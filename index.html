@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#082d38" />
+    <meta
+      name="description"
+      content="Whale Run — a two-player nautical chase across shifting waters."
+    />
+    <title>Whale Run</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <div class="sky-haze" aria-hidden="true"></div>
+    <main class="app-shell">
+      <header class="masthead">
+        <a class="brand" href="#" aria-label="Whale Run home">
+          <span class="brand-mark" aria-hidden="true">
+            <span class="brand-spout">•••</span>
+            <span class="brand-whale">◖</span>
+          </span>
+          <span>
+            <span class="eyebrow">Tides &amp; tactics</span>
+            <span class="brand-title">Whale Run</span>
+          </span>
+        </a>
+        <div class="header-actions">
+          <button class="icon-button" id="soundButton" type="button" aria-label="Turn sound on" aria-pressed="false">
+            <span aria-hidden="true">♪</span>
+          </button>
+          <button class="text-button voyage-button" id="voyageButton" type="button">Voyage map</button>
+          <button class="text-button" id="lobbyButton" type="button" hidden>Lobby</button>
+          <button class="text-button" id="rosterButton" type="button">Field guide</button>
+          <button class="text-button" id="helpButton" type="button">How to play</button>
+        </div>
+      </header>
+
+      <section class="game-layout" aria-live="polite">
+        <aside class="status-panel panel">
+          <div class="round-tag" id="roundTag">Local two-player · Voyage 1</div>
+          <h1 id="turnTitle">The Great Whale Chase</h1>
+          <p class="status-copy" id="turnCopy">Close the channels before the tide clock runs out.</p>
+
+          <div class="turn-card" id="turnCard">
+            <div class="turn-avatar" id="turnAvatar" aria-hidden="true">≈</div>
+            <div>
+              <span class="mini-label">Turn</span>
+              <strong id="turnPlayer">Waiting</strong>
+            </div>
+          </div>
+
+          <div class="score-block">
+            <div class="score-heading">
+              <span class="mini-label">Tide clock</span>
+              <strong><span id="wakeCount">0</span> moves</strong>
+            </div>
+            <div class="wake-track" id="wakeTrack" aria-label="Overall move-limit progress"></div>
+            <div class="move-limit"><span id="moveCount">0</span> moves · tide bell at <span id="moveLimit">80</span></div>
+            <div class="drift-notice" id="driftNotice" role="status" hidden></div>
+          </div>
+
+          <div class="round-scores" id="roundScores"></div>
+
+          <div class="draw-agreement" id="drawAgreement" hidden>
+            <span class="mini-label">Offer a draw</span>
+            <p>Both players must agree.</p>
+            <div class="draw-agreement-buttons">
+              <button id="playerOneDrawButton" type="button" aria-pressed="false">Mara agrees</button>
+              <button id="playerTwoDrawButton" type="button" aria-pressed="false">Finn agrees</button>
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="primary-button" id="startButton" type="button">Play game</button>
+            <button class="ghost-button" id="restartButton" type="button" hidden>Restart round</button>
+          </div>
+        </aside>
+
+        <section class="board-wrap" aria-label="Game water">
+          <div class="horizon-scene" aria-hidden="true">
+            <span class="moon-disc"></span>
+            <span class="cloud cloud-one"></span>
+            <span class="cloud cloud-two"></span>
+            <span class="gull gull-one"></span>
+            <span class="gull gull-two"></span>
+            <span class="rock-island"></span>
+          </div>
+          <div class="fog-bank fog-bank-one" aria-hidden="true"></div>
+          <div class="fog-bank fog-bank-two" aria-hidden="true"></div>
+          <div class="board-frame">
+            <div class="board" id="board" role="grid" aria-label="Eight by eight field of water"></div>
+            <div class="outcome-overlay" id="outcomeOverlay" aria-live="assertive" hidden>
+              <div class="outcome-board-delivery" id="outcomeBoardDelivery" aria-hidden="true">
+                <span class="delivery-channel-ring"></span>
+                <img class="outcome-delivery-piece" id="outcomeDeliveryPiece" src="assets/vessels/cutter.png" alt="" />
+                <img class="outcome-delivery-whale" src="assets/vessels/whale.png" alt="" />
+                <span class="delivery-wake"><i></i><i></i><i></i></span>
+                <span class="outcome-cake"><i></i><b></b></span>
+                <span class="delivery-sparkles"><i></i><i></i><i></i></span>
+              </div>
+              <div class="outcome-visual" aria-hidden="true">
+                <span class="outcome-ring"></span>
+                <img class="outcome-tug" src="assets/vessels/tug.png" alt="" />
+                <img class="outcome-boat" id="outcomeBoat" src="assets/vessels/cutter.png" alt="" />
+                <img class="outcome-whale" src="assets/vessels/whale.png" alt="" />
+                <span class="outcome-bubbles"><i></i><i></i><i></i><i></i></span>
+              </div>
+              <span class="outcome-win-badge" id="outcomeWinBadge">Whale wins!</span>
+              <div class="outcome-copy">
+                <span class="outcome-player-result" id="outcomePlayerResult"></span>
+                <strong id="outcomeTitle"></strong>
+                <p id="outcomeExplanation"></p>
+                <div class="outcome-actions">
+                  <span id="outcomeCountdown">Continue in 10s</span>
+                  <button id="outcomeSkipButton" type="button">Skip</button>
+                </div>
+              </div>
+            </div>
+            <div class="board-shine" aria-hidden="true"></div>
+            <svg class="paper-waves" viewBox="0 0 800 800" preserveAspectRatio="none" aria-hidden="true">
+              <g class="paper-ridge paper-ridge-far">
+                <path class="ridge-shadow" d="M-80 176 Q-40 159 0 170 Q35 180 65 160 Q94 140 126 157 Q160 174 198 158 Q230 146 263 166 Q300 183 335 164 Q369 143 403 156 Q436 175 474 161 Q510 146 542 158 Q575 174 612 160 Q648 149 682 166 Q716 180 751 158 Q786 139 820 155 Q860 174 900 159 L900 228 Q858 218 817 232 Q779 245 739 228 Q700 212 662 235 Q624 251 585 231 Q546 212 508 237 Q470 251 431 232 Q390 213 352 239 Q312 252 274 231 Q235 214 197 239 Q158 250 120 232 Q80 216 41 238 Q1 248 -38 231 Q-60 224 -80 232 Z" />
+                <path class="ridge-foam" d="M-80 176 Q-40 159 0 170 Q35 180 65 160 Q94 140 126 157 Q160 174 198 158 Q230 146 263 166 Q300 183 335 164 Q369 143 403 156 Q436 175 474 161 Q510 146 542 158 Q575 174 612 160 Q648 149 682 166 Q716 180 751 158 Q786 139 820 155 Q860 174 900 159" />
+              </g>
+              <g class="paper-ridge paper-ridge-middle">
+                <path class="ridge-shadow" d="M-90 420 Q-49 392 -5 409 Q37 432 78 398 Q117 371 158 409 Q198 435 240 394 Q280 368 320 405 Q359 433 400 402 Q440 380 482 410 Q524 438 565 397 Q603 370 645 408 Q687 436 728 399 Q767 374 809 406 Q853 430 910 401 L910 499 Q865 482 822 504 Q781 523 739 499 Q696 475 654 509 Q612 528 570 503 Q529 478 487 511 Q446 529 404 501 Q364 479 321 514 Q278 531 238 504 Q196 481 153 515 Q111 532 69 507 Q27 484 -15 513 Q-53 526 -90 506 Z" />
+                <path class="ridge-foam" d="M-90 420 Q-49 392 -5 409 Q37 432 78 398 Q117 371 158 409 Q198 435 240 394 Q280 368 320 405 Q359 433 400 402 Q440 380 482 410 Q524 438 565 397 Q603 370 645 408 Q687 436 728 399 Q767 374 809 406 Q853 430 910 401" />
+              </g>
+              <g class="paper-ridge paper-ridge-near">
+                <path class="ridge-shadow" d="M-100 672 Q-58 635 -15 659 Q25 686 66 641 Q103 597 145 640 Q181 682 224 651 Q264 615 305 655 Q345 691 387 646 Q426 609 469 650 Q507 682 548 640 Q586 596 629 643 Q669 690 712 649 Q751 611 792 652 Q834 681 872 635 Q895 616 920 632 L920 784 Q878 763 836 799 Q793 826 751 790 Q708 758 666 803 Q624 831 582 794 Q540 760 497 806 Q455 833 413 795 Q370 761 328 808 Q286 834 243 796 Q201 762 159 808 Q117 835 75 799 Q32 764 -10 809 Q-52 832 -100 806 Z" />
+                <path class="ridge-foam" d="M-100 672 Q-58 635 -15 659 Q25 686 66 641 Q103 597 145 640 Q181 682 224 651 Q264 615 305 655 Q345 691 387 646 Q426 609 469 650 Q507 682 548 640 Q586 596 629 643 Q669 690 712 649 Q751 611 792 652 Q834 681 872 635 Q895 616 920 632" />
+              </g>
+            </svg>
+            <div class="boat-shore" aria-hidden="true">
+              <span class="shore-sand"></span>
+              <span class="shore-dock"><i></i></span>
+            </div>
+            <div class="edge-wave edge-wave-a" aria-hidden="true"></div>
+            <div class="edge-wave edge-wave-b" aria-hidden="true"></div>
+            <div class="floating-buoy" aria-hidden="true"><i></i></div>
+          </div>
+          <p class="board-caption" id="boardCaption">Ready when you are.</p>
+        </section>
+
+        <aside class="crew-panel panel">
+          <div class="mini-label">Voyage crew</div>
+          <div id="crewCards" class="crew-cards"></div>
+          <button class="weather-card voyage-summary-button" id="sideVoyageButton" type="button">
+            <span class="weather-icon" aria-hidden="true">☾</span>
+            <div>
+              <strong id="sideVoyageTitle">The Great Whale Chase</strong>
+              <span id="sideVoyageCopy">Voyage 1 · Calm Cove</span>
+            </div>
+          </button>
+        </aside>
+      </section>
+    </main>
+
+    <dialog class="game-dialog setup-dialog" id="setupDialog">
+      <form method="dialog" id="setupForm">
+        <button class="dialog-close" id="setupCloseButton" type="button" aria-label="Close">×</button>
+        <div class="dialog-kicker">Choose how to play</div>
+        <h2 id="setupTitle">Local multiplayer</h2>
+        <p id="setupCopy">Take turns on this device. Swap crews after game one.</p>
+
+        <div class="play-mode-list" aria-label="Multiplayer mode">
+          <button class="play-mode is-selected" data-play-mode="local" type="button" aria-pressed="true">
+            <span class="play-mode-icon" aria-hidden="true">⚓</span>
+            <div><strong>Local two-player</strong><small>Share this device</small></div>
+            <span class="mode-status">Selected</span>
+          </button>
+          <button class="play-mode" data-play-mode="host" type="button" aria-pressed="false">
+            <span class="play-mode-icon" aria-hidden="true">⌂</span>
+            <div><strong>Host online</strong><small>Create a room and choose players</small></div>
+            <span class="mode-status">Host</span>
+          </button>
+          <button class="play-mode" data-play-mode="join" type="button" aria-pressed="false">
+            <span class="play-mode-icon" aria-hidden="true">⌁</span>
+            <div><strong>Join online</strong><small>Play or watch</small></div>
+            <span class="mode-status">Join</span>
+          </button>
+        </div>
+
+        <div class="chosen-voyage" id="chosenVoyage">
+          <span class="chosen-number" id="chosenVoyageNumber">01</span>
+          <div>
+            <span class="mini-label" id="chosenVoyageChapter">Calm Cove</span>
+            <strong id="chosenVoyageTitle">The Great Whale Chase</strong>
+            <small id="chosenVoyageCopy">Two boats chase one whale.</small>
+          </div>
+          <button class="small-button" id="changeVoyageButton" type="button">Change</button>
+        </div>
+
+        <div class="name-fields">
+          <label>
+            <span id="playerOneLabel">Player one</span>
+            <input id="playerOneInput" maxlength="18" value="Mara" autocomplete="off" />
+          </label>
+          <label>
+            <span id="playerTwoLabel">Player two</span>
+            <input id="playerTwoInput" maxlength="18" value="Finn" autocomplete="off" />
+          </label>
+        </div>
+
+        <label class="room-code-field" id="roomCodeField" hidden>
+          <span>Room code</span>
+          <input id="roomCodeInput" maxlength="6" placeholder="REEF42" autocomplete="off" autocapitalize="characters" />
+        </label>
+        <p class="online-setup-note" id="onlineSetupNote" hidden></p>
+
+        <label class="rule-toggle" id="ruleToggle">
+          <input id="stalemateToggle" type="checkbox" />
+          <span class="toggle-track" aria-hidden="true"><i></i></span>
+          <span>
+            <strong>Allow stalemates</strong>
+            <small>A leader with no safe move may escape for a draw.</small>
+          </span>
+        </label>
+
+        <button class="primary-button wide-button" id="beginMatchButton" value="default" type="submit">Start</button>
+      </form>
+    </dialog>
+
+    <dialog class="game-dialog lobby-dialog" id="lobbyDialog">
+      <button class="dialog-close" id="closeLobbyButton" type="button" aria-label="Close lobby">×</button>
+      <div class="dialog-kicker">Online lobby</div>
+      <div class="lobby-heading">
+        <div>
+          <h2 id="lobbyTitle">Room</h2>
+          <p id="lobbyConnectionStatus" role="status">Connecting…</p>
+        </div>
+        <button class="room-code-button" id="copyRoomCodeButton" type="button">
+          <span>Room code</span><strong id="lobbyRoomCode">------</strong>
+        </button>
+      </div>
+
+      <section class="active-seats" aria-label="Active players">
+        <article><span>Boat crew</span><strong id="boatsSeatName">Waiting for a player</strong></article>
+        <article><span>Sea-life crew</span><strong id="animalsSeatName">Waiting for a player</strong></article>
+      </section>
+
+      <div class="lobby-list-heading">
+        <div><span class="mini-label">Everyone in the lobby</span><strong id="lobbyCount" aria-live="polite">0 players</strong></div>
+        <small>Two play. Everyone else watches.</small>
+      </div>
+      <div class="lobby-players" id="lobbyPlayers"></div>
+
+      <div class="lobby-actions">
+        <button class="primary-button" id="startOnlineGameButton" type="button">Start with these players</button>
+        <button class="ghost-button" id="leaveLobbyButton" type="button">Leave room</button>
+      </div>
+    </dialog>
+
+    <dialog class="game-dialog voyage-dialog" id="voyageDialog">
+      <div class="voyage-dialog-head">
+        <div>
+          <div class="dialog-kicker">Voyage map</div>
+          <h2>Choose a voyage</h2>
+          <p>Start small. Later voyages add pieces and harder choices.</p>
+        </div>
+        <button class="dialog-close" id="closeVoyageButton" type="button" aria-label="Close">×</button>
+      </div>
+      <label class="voyage-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="voyageSearch" type="search" placeholder="Find a voyage or skill…" autocomplete="off" />
+      </label>
+      <div class="voyage-progress">
+        <span><b id="availableVoyageCount">2</b> voyages ready to play</span>
+        <span>21 voyages in five regions</span>
+      </div>
+      <p class="voyage-rule-note"><strong>Every voyage:</strong> the tug and whale lead their crews. Surround the other leader so it has no legal move.</p>
+      <nav class="voyage-jumps" id="voyageJumps" aria-label="Jump to a sea region"></nav>
+      <div class="voyage-list" id="voyageList"></div>
+    </dialog>
+
+    <dialog class="game-dialog" id="helpDialog">
+      <form method="dialog">
+        <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+        <div class="dialog-kicker">Rules</div>
+        <h2>How to play</h2>
+        <div class="help-list">
+          <div><span>1</span><p>Choose a traveler. Glowing patches show its legal moves.</p></div>
+          <div><span>2</span><p>The tug and whale lead their crews. Surround the other leader to win.</p></div>
+          <div><span>3</span><p>Land on a non-leader traveler to capture it.</p></div>
+          <div><span>4</span><p>Dinghies and silver fish move toward the far shore. From home, they may move one or two clear patches.</p></div>
+          <div><span>5</span><p>A two-patch move can be caught in passing on the next turn.</p></div>
+          <div><span>6</span><p>At the far shore, a dinghy becomes a cutter; a silver fish becomes an orca. Play continues.</p></div>
+          <div><span>7</span><p>The tide clock ends long games, but any immediate reply still counts.</p></div>
+          <div><span>8</span><p>A safe leader with no legal move makes a draw.</p></div>
+          <div><span>9</span><p>Local matches have two games. Online rooms have two active players; others watch.</p></div>
+        </div>
+        <button class="primary-button wide-button" value="default">Got it</button>
+      </form>
+    </dialog>
+
+    <dialog class="game-dialog roster-dialog" id="rosterDialog">
+      <form method="dialog">
+        <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+        <div class="dialog-kicker">The field guide</div>
+        <h2>Crews of the bay</h2>
+        <p>Each traveler moves differently.</p>
+        <h3>Working boats</h3>
+        <div class="roster-grid" id="rosterBoats"></div>
+        <h3>Sea life</h3>
+        <div class="roster-grid" id="rosterAnimals"></div>
+        <button class="primary-button wide-button" value="default">Close</button>
+      </form>
+    </dialog>
+
+    <dialog class="game-dialog result-dialog" id="resultDialog">
+      <div class="result-bubbles" aria-hidden="true">○ · ○ · ◦</div>
+      <div class="dialog-kicker" id="resultKicker">Round complete</div>
+      <h2 id="resultTitle">The whale slipped away!</h2>
+      <p id="resultCopy"></p>
+      <div class="match-summary" id="matchSummary" hidden></div>
+      <button class="primary-button wide-button" id="nextRoundButton" type="button">Switch sides</button>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script defer src="src/app.bundle.js"></script>
+  </body>
+</html>
