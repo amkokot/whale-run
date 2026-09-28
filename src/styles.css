@@ -539,8 +539,11 @@ h1 {
   z-index: 5;
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   width: 100%;
   aspect-ratio: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border-radius: 17px;
   background: transparent;
@@ -551,8 +554,13 @@ h1 {
   position: relative;
   display: grid;
   place-items: center;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  appearance: none;
+  contain: layout;
+  line-height: 0;
   padding: 0;
   overflow: visible;
   border: 0;
@@ -889,6 +897,9 @@ h1 {
   z-index: 10;
   display: grid;
   place-items: center;
+  min-width: 0;
+  min-height: 0;
+  contain: layout;
   pointer-events: none;
   filter: drop-shadow(0 10px 7px rgba(0, 18, 21, 0.4));
   transform-origin: 50% 75%;
@@ -899,7 +910,10 @@ h1 {
   z-index: 6;
   display: block;
   width: 96%;
+  height: auto;
+  max-height: 100%;
   max-width: none;
+  object-fit: contain;
   scale: var(--piece-depth, 1);
   user-select: none;
   animation: vessel-bob 3s ease-in-out infinite;
