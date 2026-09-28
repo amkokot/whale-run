@@ -307,6 +307,15 @@ export function legalMoves(state, pieceId) {
     .filter((target) => !wouldCauseChaseStalemate(state, pieceId, target))
 }
 
+export function isSelectablePiece(state, pieceId) {
+  return Boolean(
+    typeof pieceId === 'string'
+    && state.pieces[pieceId]
+    && pieceSide(pieceId) === state.turn
+    && !state.result
+  )
+}
+
 export function availablePieces(state, side = state.turn) {
   return Object.keys(state.pieces).filter(
     (pieceId) => pieceSide(pieceId) === side && legalMoves(state, pieceId).length,

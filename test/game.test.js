@@ -6,6 +6,7 @@ import {
   createRound,
   evaluateMaterialEnding,
   evaluateRound,
+  isSelectablePiece,
   legalMoves,
   makeMove,
   movementMoves,
@@ -27,6 +28,21 @@ test('new rounds have a playable position', () => {
   assert.equal(state.turn, 'boats')
   assert.ok(legalMoves(state, 'tug').length > 0)
   assert.ok(legalMoves(state, 'cutter').length > 0)
+})
+
+test('only a piece belonging to the active crew can be selected', () => {
+  const boatsTurn = createRound('cutter')
+  assert.equal(isSelectablePiece(boatsTurn, 'tug'), true)
+  assert.equal(isSelectablePiece(boatsTurn, 'cutter'), true)
+  assert.equal(isSelectablePiece(boatsTurn, 'whale'), false)
+  assert.equal(isSelectablePiece(boatsTurn, 'missing'), false)
+
+  const animalsTurn = { ...boatsTurn, turn: 'animals' }
+  assert.equal(isSelectablePiece(animalsTurn, 'whale'), true)
+  assert.equal(isSelectablePiece(animalsTurn, 'tug'), false)
+
+  const finished = { ...boatsTurn, result: { winner: 'boats' } }
+  assert.equal(isSelectablePiece(finished, 'tug'), false)
 })
 
 test('the tug moves one neighboring patch and never beside the whale', () => {

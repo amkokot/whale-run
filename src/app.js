@@ -3,6 +3,7 @@ import {
   ROSTER,
   ROSTER_ORDER,
   createRound,
+  isSelectablePiece,
   legalMoves,
   makeMove,
   noProgressMoveLimit,
@@ -365,7 +366,6 @@ async function broadcastLobbyState() {
 
 function gameSnapshot() {
   const state = structuredClone(match.state)
-  state.selected = null
   return {
     hostDeviceId: onlineHostDeviceId(),
     revision: ++online.gameRevision,
@@ -453,6 +453,16 @@ function applyOnlineMove(pieceId, target) {
   return true
 }
 
+function applyOnlineSelection(pieceId) {
+  if (match.phase !== 'playing' || match.state.result) return false
+  if (pieceId !== null && !isSelectablePiece(match.state, pieceId)) return false
+  match.state.selected = pieceId
+  refreshBoardHighlights()
+  renderStatus()
+  void broadcastGameState()
+  return true
+}
+
 function handleOnlineMessage(message) {
   if (
     !message
@@ -479,6 +489,11 @@ function handleOnlineMessage(message) {
     if (message.type === 'move_request') {
       if (!deviceControlsSide(online.lobby, message.deviceId, match.state.turn)) return
       if (!applyOnlineMove(payload.pieceId, payload.target)) void broadcastGameState()
+      return
+    }
+    if (message.type === 'selection_request') {
+      if (!deviceControlsSide(online.lobby, message.deviceId, match.state.turn)) return
+      if (!applyOnlineSelection(payload.pieceId)) void broadcastGameState()
       return
     }
     if (message.type === 'draw_agreement') {
@@ -1237,10 +1252,18 @@ function handleCellClick(target) {
   }
 
   if (clickedPiece && clickedSide === match.state.turn) {
-    match.state.selected = match.state.selected === clickedPiece ? null : clickedPiece
+    const selectedPiece = match.state.selected === clickedPiece ? null : clickedPiece
+    match.state.selected = selectedPiece
     playSound('select')
     refreshBoardHighlights()
     renderStatus()
+    if (match.mode === 'online') {
+      if (online.role === 'host') {
+        void broadcastGameState()
+      } else {
+        void online.room.send('selection_request', { pieceId: selectedPiece })
+      }
+    }
     return
   }
 
