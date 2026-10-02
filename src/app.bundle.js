@@ -958,11 +958,23 @@ function onlineConfigured(config = ONLINE_CONFIG) {
 }
 
 // src/online-room.js
+const FAILED_CHANNEL_STATUSES = ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']
+
 function createChannelTopic(roomCode, config = ONLINE_CONFIG) {
   const prefix = String(config.channelPrefix || 'arcade').trim().toLowerCase()
   const appId = String(config.appId || 'whale-run').trim().toLowerCase()
   const version = Number.isInteger(config.protocolVersion) ? config.protocolVersion : 1
   return `${prefix}:${appId}:v${version}:${roomCode.toUpperCase()}`
+}
+
+function channelStatusUpdate(status, { hasConnected = false, isClosing = false } = {}) {
+  if (status === 'SUBSCRIBED') {
+    return { status: 'connected', reconnected: hasConnected, reason: null }
+  }
+  if (FAILED_CHANNEL_STATUSES.includes(status) && !isClosing) {
+    return { status: 'error', reconnected: false, reason: status }
+  }
+  return null
 }
 
 class RealtimeRoom {
@@ -975,11 +987,14 @@ class RealtimeRoom {
     this.onStatus = onStatus
     this.client = null
     this.channel = null
+    this.hasConnected = false
+    this.isClosing = false
   }
 
   async connect() {
     if (!onlineConfigured()) throw new Error('Online play needs a Supabase URL and publishable key.')
-    this.onStatus?.('connecting')
+    this.isClosing = false
+    this.onStatus?.('connecting', { reconnected: false, reason: null })
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')
     this.client = createClient(ONLINE_CONFIG.supabaseUrl, ONLINE_CONFIG.supabasePublishableKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -1000,21 +1015,39 @@ class RealtimeRoom {
       })
 
     await new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('The room connection timed out.')), 12000)
+      const timeout = window.setTimeout(() => {
+        if (this.hasConnected || this.isClosing) return
+        this.onStatus?.('error', { reconnected: false, reason: 'CONNECT_TIMEOUT' })
+        reject(new Error('The room connection timed out.'))
+      }, 12000)
       this.channel.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
+        const update = channelStatusUpdate(status, {
+          hasConnected: this.hasConnected,
+          isClosing: this.isClosing,
+        })
+        if (!update) return
+
+        if (update.status === 'connected') {
           window.clearTimeout(timeout)
-          await this.channel.track({
+          const trackResult = await this.channel.track({
             deviceId: this.deviceId,
             playerNames: this.playerNames,
             joinedAt: new Date().toISOString(),
           })
-          this.onStatus?.('connected')
+          if (trackResult !== 'ok') {
+            this.onStatus?.('error', { reconnected: false, reason: `TRACK_${trackResult}` })
+            if (!this.hasConnected) reject(new Error('The room could not announce this player.'))
+            return
+          }
+          this.hasConnected = true
+          this.onStatus?.('connected', update)
           resolve()
-        } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
+        } else {
           window.clearTimeout(timeout)
-          this.onStatus?.('error')
-          reject(new Error(`Room connection failed: ${status.toLowerCase().replaceAll('_', ' ')}`))
+          this.onStatus?.('error', update)
+          if (!this.hasConnected) {
+            reject(new Error(`Room connection failed: ${status.toLowerCase().replaceAll('_', ' ')}`))
+          }
         }
       })
     })
@@ -1038,10 +1071,12 @@ class RealtimeRoom {
 
   async close() {
     if (!this.client || !this.channel) return
+    this.isClosing = true
     await this.client.removeChannel(this.channel)
     this.channel = null
     this.client = null
-    this.onStatus?.('closed')
+    this.hasConnected = false
+    this.onStatus?.('closed', { reconnected: false, reason: null })
   }
 }
 
@@ -1156,6 +1191,7 @@ const elements = {
   copyRoomCodeButton: document.querySelector('#copyRoomCodeButton'),
   leaveLobbyButton: document.querySelector('#leaveLobbyButton'),
   onlineSetupNote: document.querySelector('#onlineSetupNote'),
+  onlineConnectionBanner: document.querySelector('#onlineConnectionBanner'),
   startOnlineGameButton: document.querySelector('#startOnlineGameButton'),
   animalsSeatName: document.querySelector('#animalsSeatName'),
   voyageButton: document.querySelector('#voyageButton'),
@@ -1193,6 +1229,7 @@ const online = {
   lobby: null,
   status: 'closed',
   gameRevision: 0,
+  presenceDeviceIds: [],
   nameDrafts: {
     local: ['Mara', 'Finn'],
     online: ['Mara', ''],
@@ -1296,6 +1333,37 @@ function messageCameFromHost(message) {
   return Boolean(onlineHostDeviceId() && message.deviceId === onlineHostDeviceId())
 }
 
+function onlineHostIsPresent() {
+  const hostDeviceId = onlineHostDeviceId()
+  return online.role === 'host' || Boolean(hostDeviceId && online.presenceDeviceIds.includes(hostDeviceId))
+}
+
+function onlinePlayIsReady() {
+  return online.status === 'connected' && onlineHostIsPresent()
+}
+
+function renderOnlineConnection() {
+  if (match.mode !== 'online') {
+    elements.onlineConnectionBanner.hidden = true
+    return
+  }
+
+  let message = ''
+  let status = online.status
+  if (online.status === 'connecting') {
+    message = 'Reconnecting… Moves are paused.'
+  } else if (online.status === 'error') {
+    message = 'Connection interrupted. Reconnecting…'
+  } else if (online.lobby && !onlineHostIsPresent()) {
+    message = 'Host disconnected. Waiting to reconnect…'
+    status = 'waiting'
+  }
+
+  elements.onlineConnectionBanner.hidden = !message
+  elements.onlineConnectionBanner.dataset.status = status
+  elements.onlineConnectionBanner.textContent = message
+}
+
 function updatePlayersFromLobby() {
   if (!online.lobby) return
   const boats = playerForSeat(online.lobby, 'boats')
@@ -1313,7 +1381,9 @@ function renderLobby() {
     error: 'Connection lost.',
     closed: 'Offline.',
   }
-  elements.lobbyConnectionStatus.textContent = statusCopy[online.status] || statusCopy.closed
+  elements.lobbyConnectionStatus.textContent = online.lobby && !onlineHostIsPresent()
+    ? 'Host offline. Waiting to reconnect…'
+    : statusCopy[online.status] || statusCopy.closed
 
   if (!lobby) {
     elements.boatsSeatName.textContent = 'Waiting for the host'
@@ -1335,7 +1405,7 @@ function renderLobby() {
   elements.animalsSeatName.textContent = animals?.name || 'Waiting for a player'
   elements.lobbyCount.textContent = `${players.length} ${players.length === 1 ? 'player' : 'players'}`
   elements.startOnlineGameButton.hidden = online.role !== 'host'
-  elements.startOnlineGameButton.disabled = !canStartLobbyGame(lobby)
+  elements.startOnlineGameButton.disabled = !onlinePlayIsReady() || !canStartLobbyGame(lobby)
   elements.startOnlineGameButton.textContent = match.phase === 'playing' ? 'Return to game' : 'Start game'
 
   elements.lobbyPlayers.replaceChildren(...players.map((player) => {
@@ -1388,7 +1458,7 @@ function openLobby() {
 async function broadcastLobbyState() {
   if (online.role !== 'host' || !online.room || !online.lobby) return
   renderLobby()
-  await online.room.send('lobby_state', { lobby: online.lobby })
+  await sendOnlineMessage('lobby_state', { lobby: online.lobby })
 }
 
 function gameSnapshot() {
@@ -1409,12 +1479,51 @@ function gameSnapshot() {
 
 async function broadcastGameState() {
   if (online.role !== 'host' || !online.room || !online.lobby || !match.state) return
-  await online.room.send('game_state', gameSnapshot())
+  await sendOnlineMessage('game_state', gameSnapshot())
 }
 
 async function broadcastFullRoomState() {
   await broadcastLobbyState()
   if (match.phase !== 'idle') await broadcastGameState()
+}
+
+async function sendOnlineMessage(type, payload = {}, { announceFailure = false } = {}) {
+  if (!online.room) return false
+  try {
+    const result = await online.room.send(type, payload)
+    if (result === 'ok') return true
+    console.warn(`Online message ${type} was not sent: ${result}`)
+  } catch (error) {
+    console.warn(`Online message ${type} failed`, error)
+  }
+  if (announceFailure) showToast('Not sent. Waiting for the connection…')
+  return false
+}
+
+async function resyncOnlineRoom() {
+  if (!online.room || online.status !== 'connected') return
+  if (online.role === 'host') {
+    await broadcastFullRoomState()
+    return
+  }
+  await sendOnlineMessage('join_request', { playerNames: online.room.playerNames })
+  await sendOnlineMessage('state_request')
+}
+
+function handleOnlineStatus(status, details = {}) {
+  const priorStatus = online.status
+  online.status = status
+  renderLobby()
+  renderStatus()
+  renderDrawAgreement()
+  if (match.mode !== 'online') return
+
+  if (status === 'error' && priorStatus !== 'error') {
+    showToast('Connection interrupted. Reconnecting…')
+  } else if (status === 'connected' && details.reconnected) {
+    showToast('Back online. Syncing game…')
+    void resyncOnlineRoom()
+  }
 }
 
 function scheduleReplicaOutcome() {
@@ -1540,6 +1649,8 @@ function handleOnlineMessage(message) {
     online.lobby = structuredClone(nextLobby)
     updatePlayersFromLobby()
     renderLobby()
+    renderStatus()
+    renderDrawAgreement()
   } else if (message.type === 'game_state' && messageCameFromHost(message)) {
     applyGameSnapshot(payload)
   }
@@ -1547,6 +1658,7 @@ function handleOnlineMessage(message) {
 
 function handleOnlinePresence(presences) {
   const connectedDeviceIds = [...new Set(presences.map((presence) => presence.deviceId).filter(Boolean))]
+  online.presenceDeviceIds = connectedDeviceIds
   if (!online.lobby) return
   if (online.role === 'host') {
     const reconciled = reconcileLobbyPresence(online.lobby, connectedDeviceIds)
@@ -1557,9 +1669,8 @@ function handleOnlinePresence(presences) {
   } else {
     renderLobby()
   }
-  if (online.role !== 'host' && !connectedDeviceIds.includes(onlineHostDeviceId())) {
-    elements.lobbyConnectionStatus.textContent = 'Host offline. Waiting to reconnect…'
-  }
+  renderStatus()
+  renderDrawAgreement()
 }
 
 async function startOnlineRoom(role) {
@@ -1593,6 +1704,7 @@ async function startOnlineRoom(role) {
     online.roomCode = roomCode
     online.status = 'connecting'
     online.gameRevision = 0
+    online.presenceDeviceIds = []
     online.lobby = role === 'host'
       ? createLobby({ roomCode, hostDeviceId: online.deviceId, playerNames })
       : null
@@ -1602,10 +1714,7 @@ async function startOnlineRoom(role) {
       playerNames,
       onMessage: handleOnlineMessage,
       onPresence: handleOnlinePresence,
-      onStatus: (status) => {
-        online.status = status
-        renderLobby()
-      },
+      onStatus: handleOnlineStatus,
     })
     await online.room.connect()
     match.mode = 'online'
@@ -1617,8 +1726,9 @@ async function startOnlineRoom(role) {
       updatePlayersFromLobby()
       await broadcastLobbyState()
     } else {
-      await online.room.send('join_request', { playerNames })
-      await online.room.send('state_request')
+      const joined = await sendOnlineMessage('join_request', { playerNames })
+      const requestedState = await sendOnlineMessage('state_request')
+      if (!joined || !requestedState) throw new Error('The room did not answer. Try joining again.')
     }
     elements.setupDialog.close()
     render()
@@ -1643,6 +1753,7 @@ async function leaveOnlineRoom({ quiet = false } = {}) {
   online.lobby = null
   online.status = 'closed'
   online.gameRevision = 0
+  online.presenceDeviceIds = []
   if (elements.lobbyDialog.open) elements.lobbyDialog.close()
   if (match.mode === 'online') {
     match.mode = 'local'
@@ -2008,7 +2119,11 @@ function renderDrawAgreement() {
   buttons.forEach((button, index) => {
     const agreed = match.drawAgreements[index]
     const side = index === 0 ? 'boats' : 'animals'
-    const canAgree = match.mode !== 'online' || Boolean(online.lobby && deviceControlsSide(online.lobby, online.deviceId, side))
+    const canAgree = match.mode !== 'online' || Boolean(
+      onlinePlayIsReady()
+      && online.lobby
+      && deviceControlsSide(online.lobby, online.deviceId, side)
+    )
     button.textContent = agreed ? `✓ ${match.players[index]} agrees` : `${match.players[index]} agrees`
     button.setAttribute('aria-pressed', String(agreed))
     button.classList.toggle('is-agreed', agreed)
@@ -2040,6 +2155,7 @@ function renderStatus() {
   const state = match.state
   const voyage = activeVoyage()
   const chapter = chapterFor(voyage)
+  renderOnlineConnection()
   elements.startButton.hidden = match.phase !== 'idle' || match.mode === 'online'
   elements.lobbyButton.hidden = match.mode !== 'online'
   elements.restartButton.hidden = match.phase === 'idle' || (match.mode === 'online' && online.role !== 'host')
@@ -2065,7 +2181,11 @@ function renderStatus() {
 
   const isBoats = state.turn === 'boats'
   const player = rolePlayer(state.turn)
-  const controlsTurn = match.mode !== 'online' || Boolean(online.lobby && deviceControlsSide(online.lobby, online.deviceId, state.turn))
+  const controlsTurn = match.mode !== 'online' || Boolean(
+    onlinePlayIsReady()
+    && online.lobby
+    && deviceControlsSide(online.lobby, online.deviceId, state.turn)
+  )
   const inDanger = threatenedByBoats(state, state.pieces.whale)
   elements.turnPlayer.textContent = player
   elements.turnAvatar.textContent = isBoats ? '⚓' : '◖'
@@ -2252,6 +2372,10 @@ function showOutcomeAnimation(result) {
 
 function handleCellClick(target) {
   if (match.phase !== 'playing' || match.state.result) return
+  if (match.mode === 'online' && !onlinePlayIsReady()) {
+    showToast('Waiting for the connection…')
+    return
+  }
   if (
     match.mode === 'online'
     && (!online.lobby || !deviceControlsSide(online.lobby, online.deviceId, match.state.turn))
@@ -2269,8 +2393,16 @@ function handleCellClick(target) {
       if (match.mode === 'online' && online.role !== 'host') {
         match.state.selected = null
         refreshBoardHighlights()
-        void online.room.send('move_request', { pieceId: movingPiece, target })
-        showToast('Move sent.')
+        void sendOnlineMessage('move_request', { pieceId: movingPiece, target }, { announceFailure: true })
+          .then((sent) => {
+            if (sent) {
+              showToast('Move sent.')
+              return
+            }
+            match.state.selected = movingPiece
+            refreshBoardHighlights()
+            renderStatus()
+          })
       } else {
         applyOnlineMove(movingPiece, target)
       }
@@ -2288,7 +2420,7 @@ function handleCellClick(target) {
       if (online.role === 'host') {
         void broadcastGameState()
       } else {
-        void online.room.send('selection_request', { pieceId: selectedPiece })
+        void sendOnlineMessage('selection_request', { pieceId: selectedPiece })
       }
     }
     return
@@ -2629,6 +2761,10 @@ function handleDrawAgreement(playerIndex) {
     applyDrawAgreement(playerIndex)
     return
   }
+  if (!onlinePlayIsReady()) {
+    showToast('Waiting for the connection…')
+    return
+  }
   const side = playerIndex === 0 ? 'boats' : 'animals'
   if (!online.lobby || !deviceControlsSide(online.lobby, online.deviceId, side)) {
     showToast(`${match.players[playerIndex]} must agree from their device.`)
@@ -2637,8 +2773,10 @@ function handleDrawAgreement(playerIndex) {
   if (online.role === 'host') {
     applyDrawAgreement(playerIndex)
   } else {
-    void online.room.send('draw_agreement', { playerIndex })
-    showToast('Draw choice sent.')
+    void sendOnlineMessage('draw_agreement', { playerIndex }, { announceFailure: true })
+      .then((sent) => {
+        if (sent) showToast('Draw choice sent.')
+      })
   }
 }
 

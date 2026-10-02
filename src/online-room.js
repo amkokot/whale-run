@@ -1,10 +1,22 @@
 import { ONLINE_CONFIG, onlineConfigured } from './online-config.js'
 
+const FAILED_CHANNEL_STATUSES = ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']
+
 export function createChannelTopic(roomCode, config = ONLINE_CONFIG) {
   const prefix = String(config.channelPrefix || 'arcade').trim().toLowerCase()
   const appId = String(config.appId || 'whale-run').trim().toLowerCase()
   const version = Number.isInteger(config.protocolVersion) ? config.protocolVersion : 1
   return `${prefix}:${appId}:v${version}:${roomCode.toUpperCase()}`
+}
+
+export function channelStatusUpdate(status, { hasConnected = false, isClosing = false } = {}) {
+  if (status === 'SUBSCRIBED') {
+    return { status: 'connected', reconnected: hasConnected, reason: null }
+  }
+  if (FAILED_CHANNEL_STATUSES.includes(status) && !isClosing) {
+    return { status: 'error', reconnected: false, reason: status }
+  }
+  return null
 }
 
 export class RealtimeRoom {
@@ -17,11 +29,14 @@ export class RealtimeRoom {
     this.onStatus = onStatus
     this.client = null
     this.channel = null
+    this.hasConnected = false
+    this.isClosing = false
   }
 
   async connect() {
     if (!onlineConfigured()) throw new Error('Online play needs a Supabase URL and publishable key.')
-    this.onStatus?.('connecting')
+    this.isClosing = false
+    this.onStatus?.('connecting', { reconnected: false, reason: null })
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')
     this.client = createClient(ONLINE_CONFIG.supabaseUrl, ONLINE_CONFIG.supabasePublishableKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -42,21 +57,39 @@ export class RealtimeRoom {
       })
 
     await new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('The room connection timed out.')), 12000)
+      const timeout = window.setTimeout(() => {
+        if (this.hasConnected || this.isClosing) return
+        this.onStatus?.('error', { reconnected: false, reason: 'CONNECT_TIMEOUT' })
+        reject(new Error('The room connection timed out.'))
+      }, 12000)
       this.channel.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
+        const update = channelStatusUpdate(status, {
+          hasConnected: this.hasConnected,
+          isClosing: this.isClosing,
+        })
+        if (!update) return
+
+        if (update.status === 'connected') {
           window.clearTimeout(timeout)
-          await this.channel.track({
+          const trackResult = await this.channel.track({
             deviceId: this.deviceId,
             playerNames: this.playerNames,
             joinedAt: new Date().toISOString(),
           })
-          this.onStatus?.('connected')
+          if (trackResult !== 'ok') {
+            this.onStatus?.('error', { reconnected: false, reason: `TRACK_${trackResult}` })
+            if (!this.hasConnected) reject(new Error('The room could not announce this player.'))
+            return
+          }
+          this.hasConnected = true
+          this.onStatus?.('connected', update)
           resolve()
-        } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
+        } else {
           window.clearTimeout(timeout)
-          this.onStatus?.('error')
-          reject(new Error(`Room connection failed: ${status.toLowerCase().replaceAll('_', ' ')}`))
+          this.onStatus?.('error', update)
+          if (!this.hasConnected) {
+            reject(new Error(`Room connection failed: ${status.toLowerCase().replaceAll('_', ' ')}`))
+          }
         }
       })
     })
@@ -80,10 +113,12 @@ export class RealtimeRoom {
 
   async close() {
     if (!this.client || !this.channel) return
+    this.isClosing = true
     await this.client.removeChannel(this.channel)
     this.channel = null
     this.client = null
-    this.onStatus?.('closed')
+    this.hasConnected = false
+    this.onStatus?.('closed', { reconnected: false, reason: null })
   }
 }
 
