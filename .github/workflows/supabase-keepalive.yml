@@ -1,0 +1,44 @@
+name: Keep Supabase active
+
+on:
+  schedule:
+    # GitHub schedules use UTC. Running away from the top of the hour reduces delays.
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - name: Check configuration
+        shell: bash
+        run: |
+          test -n "$SUPABASE_URL" || { echo "Missing repository variable SUPABASE_URL"; exit 1; }
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || { echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY"; exit 1; }
+
+      - name: Make lightweight database requests
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            curl --fail-with-body --silent --show-error \
+              --retry 2 --retry-all-errors \
+              --request POST \
+              --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+              --header "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" \
+              --header "Content-Type: application/json" \
+              --data '{}' \
+              "$SUPABASE_URL/rest/v1/rpc/keepalive" >/dev/null
+          done
+
+          echo "Supabase database responded successfully."
