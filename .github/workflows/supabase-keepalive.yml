@@ -16,7 +16,7 @@ concurrency:
 jobs:
   ping-database:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     env:
       SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -32,7 +32,8 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             curl --fail-with-body --silent --show-error \
-              --retry 2 --retry-all-errors \
+              --connect-timeout 15 --max-time 30 \
+              --retry 8 --retry-delay 15 --retry-max-time 180 --retry-all-errors \
               --request POST \
               --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
               --header "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" \
